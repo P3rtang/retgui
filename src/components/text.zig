@@ -32,6 +32,8 @@ pub fn init(props: Props) *Component {
 }
 
 pub fn draw(this: *Component) !void {
+    this.debug(.Info, "Called draw on Text");
+
     const self = this.cast(Self);
 
     const styling = this.styling.withSelector(this.selectors);
@@ -55,7 +57,6 @@ pub fn draw(this: *Component) !void {
         .y = y_f + (height_f - text_size.y) / 2,
     };
 
-    std.debug.print("Drawing text: {s} at ({}, {})\n", .{ self.content, pos.x, pos.y });
     rl.drawTextEx(font, null_terminated, pos, @floatFromInt(font_size), 2, rl.Color.black);
 }
 

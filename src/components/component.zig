@@ -1,5 +1,6 @@
 const std = @import("std");
 const rl = @import("raylib");
+const time = @import("zig-time");
 
 const stl = @import("styling.zig");
 const ev = @import("events");
@@ -17,6 +18,20 @@ const Styling = stl.Styling;
 const Selector = stl.Selector;
 
 const getFontSize = @import("font.zig").getFontSize;
+
+const LogLevel = enum {
+    Info,
+    Warn,
+    Error,
+
+    pub fn toString(self: LogLevel) []const u8 {
+        return switch (self) {
+            .Info => "INFO",
+            .Warn => "WARN",
+            .Error => "ERROR",
+        };
+    }
+};
 
 const Vector2Int = struct {
     x: i32,
@@ -95,6 +110,13 @@ pub fn init(props: Props) Self {
 pub fn deinit(self: *Self, comptime T: type) void {
     const self_ptr = self.cast(T);
     self.alloc.destroy(self_ptr);
+}
+
+pub fn debug(self: *Self, severity: LogLevel, message: []const u8) void {
+    const now = time.Time.now().setLoc(time.UTC);
+    const fmtRes = now.formatAlloc(self.alloc, "YYYY-MM-DD HH:mm:ss") catch "N/A";
+
+    std.debug.print("{s} | [{s}] | Component {d}: {s}\n", .{ fmtRes, severity.toString(), self.uid.id, message });
 }
 
 pub fn draw(self: *Self) !void {

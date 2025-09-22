@@ -244,6 +244,7 @@ const Window = struct {
         rl.endDrawing();
 
         rl.pollInputEvents();
+
         const pos = rl.getMousePosition();
 
         // TODO: make sure the mouse event does not re-trigger if the mouse has been moved

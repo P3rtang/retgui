@@ -1,0 +1,8 @@
+# Ignore build files
+/*zig-*/
+
+# Ignore ctags
+tags
+
+# Ignore local fonts they could have different licenses
+*.ttf
