@@ -1,6 +1,8 @@
 const std = @import("std");
 const rl = @import("raylib");
-const time = @import("zig-time");
+const time = @cImport({
+    @cInclude("time.h");
+});
 
 const stl = @import("styling.zig");
 const ev = @import("events");
@@ -31,6 +33,12 @@ const LogLevel = enum {
             .Error => "ERROR",
         };
     }
+};
+
+const DebugOptions = struct {
+    severity: LogLevel = .Info,
+    message: ?[]const u8 = null,
+    loc: ?std.builtin.SourceLocation = null,
 };
 
 const Vector2Int = struct {
@@ -112,11 +120,31 @@ pub fn deinit(self: *Self, comptime T: type) void {
     self.alloc.destroy(self_ptr);
 }
 
-pub fn debug(self: *Self, severity: LogLevel, message: []const u8) void {
-    const now = time.Time.now().setLoc(time.UTC);
-    const fmtRes = now.formatAlloc(self.alloc, "YYYY-MM-DD HH:mm:ss") catch "N/A";
+pub fn debug(self: *Self, opts: DebugOptions) void {
+    const tm = time.time(null);
+    const tm_ptr = time.localtime(&tm);
 
-    std.debug.print("{s} | [{s}] | Component {d}: {s}\n", .{ fmtRes, severity.toString(), self.uid.id, message });
+    var buffer: [32]u8 = undefined;
+    _ = time.strftime(&buffer, 32, "%Y-%m-%d %H.%M.%S", tm_ptr);
+    _ = std.fmt.bufPrint(buffer[19..], "{:0>3}", .{@mod(std.time.milliTimestamp(), 1000)}) catch "";
+    // do this later to replace the sign of the milliseconds string
+    buffer[19] = '_';
+
+    const fileLine = fl: {
+        if (opts.loc) |loc| {
+            break :fl std.fmt.allocPrint(self.alloc, "src/{s}/{s}:{}", .{ loc.module, loc.file, loc.line }) catch "";
+        }
+
+        break :fl "";
+    };
+
+    std.debug.print("{s}: {s} | {s} | Component {d}: {s}\n", .{
+        fileLine,
+        opts.severity.toString(),
+        buffer[0..23],
+        self.uid.id,
+        opts.message orelse "",
+    });
 }
 
 pub fn draw(self: *Self) !void {

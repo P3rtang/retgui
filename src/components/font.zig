@@ -1,7 +1,7 @@
 const std = @import("std");
 const rl = @import("raylib");
 
-const font_path = "./ComicMono.ttf";
+const font_path = "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf";
 
 pub const FontMap = std.AutoHashMapUnmanaged(i32, rl.Font);
 

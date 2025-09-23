@@ -32,8 +32,6 @@ pub fn init(props: Props) *Component {
 }
 
 pub fn draw(this: *Component) !void {
-    this.debug(.Info, "Called draw on Text");
-
     const self = this.cast(Self);
 
     const styling = this.styling.withSelector(this.selectors);

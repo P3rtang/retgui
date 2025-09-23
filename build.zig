@@ -94,11 +94,6 @@ pub fn build(b: *std.Build) void {
     rayzig_module.linkLibrary(raylib_artifact);
     exe.root_module.addImport("raylib", rayzig_module);
 
-    const time_dep = b.dependency("zig-time", .{ .target = target, .optimize = optimize });
-    const time_module = time_dep.module("zig-time");
-
-    exe.root_module.addImport("zig-time", time_module);
-
     const events_module = b.addModule("event", .{
         .root_source_file = b.path("src/events/mod.zig"),
         .target = target,
@@ -114,7 +109,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .imports = &.{
             .{ .name = "raylib", .module = rayzig_module },
-            .{ .name = "zig-time", .module = time_module },
             .{ .name = "events", .module = events_module },
         },
     });

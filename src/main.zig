@@ -226,25 +226,21 @@ const Window = struct {
     }
 
     pub fn draw(this: *Component) !void {
-        const self = this.cast(Self);
+        // raylib does not care about the first end if there was no begin
+        rl.endDrawing();
 
+        // Pause to avoid busy looping
+        rl.pollInputEvents();
+
+        // Initialize event waiting only once and after the first poll
+        // This avoids pausing on startup
         if (!isInitalized) {
             rl.enableEventWaiting();
 
             isInitalized = true;
         }
 
-        rl.beginDrawing();
-        rl.clearBackground(rl.Color.ray_white);
-
-        for (self.component.children.items) |child| {
-            try child.draw();
-        }
-
-        rl.endDrawing();
-
-        rl.pollInputEvents();
-
+        // Handle all events
         const pos = rl.getMousePosition();
 
         // TODO: make sure the mouse event does not re-trigger if the mouse has been moved
@@ -258,10 +254,16 @@ const Window = struct {
 
         try Component.t.componentTree.?.mouseMove(@intFromFloat(pos.x), @intFromFloat(pos.y));
 
+        // Close window if requested
         if (rl.windowShouldClose()) {
             return;
         }
 
+        // Begin drawing
+        rl.beginDrawing();
+        rl.clearBackground(rl.Color.ray_white);
+
+        // Any call to the component draw function will redraw all children as well
         try this.draw();
     }
 };
