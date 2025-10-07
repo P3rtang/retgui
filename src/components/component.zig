@@ -14,7 +14,7 @@ const Uid = t.Uid;
 const Self = @This();
 
 const EventKind = ev.EventKind;
-const Callback = ev.Callback(Self);
+const Callback = ev.Callback;
 
 const Styling = stl.Styling;
 const Selector = stl.Selector;
@@ -41,9 +41,9 @@ const DebugOptions = struct {
     loc: ?std.builtin.SourceLocation = null,
 };
 
-const Vector2Int = struct {
-    x: i32,
-    y: i32,
+pub const Vector2Int = struct {
+    x: i32 = 0,
+    y: i32 = 0,
 };
 
 pub const Rectangle = struct {
@@ -52,12 +52,12 @@ pub const Rectangle = struct {
     width: i32,
     height: i32,
 
-    pub fn init(x: i32, y: i32, width: i32, height: i32) Rectangle {
+    pub fn init(x: i32, y: i32, width_: i32, height_: i32) Rectangle {
         return Rectangle{
             .x = x,
             .y = y,
-            .width = width,
-            .height = height,
+            .width = width_,
+            .height = height_,
         };
     }
 
@@ -80,42 +80,48 @@ pub const Rectangle = struct {
     }
 };
 
-pub const Props = struct { alloc: std.mem.Allocator };
+pub const Size = struct {
+    width: i32,
+    height: i32,
+};
 
-alloc: std.mem.Allocator,
+// TODO: remove the allocation here, it should all go through tree
+alloc: std.mem.Allocator = std.heap.page_allocator,
 uid: Uid,
 super: ?*anyopaque = null,
 
 selectors: Selector = .None,
 
-children: std.ArrayList(*Self),
+children: std.ArrayList(*Self) = std.ArrayList(*Self).empty,
 
 rect: Rectangle,
 styling: Styling = Styling{},
 
+deinitFn: ?*const fn (self: *Self) void = null,
 drawFn: ?*const fn (self: *Self) anyerror!void = null,
 setTextFn: ?*const fn (self: *Self, text: []const u8) void = null,
+sizeFn: ?*const fn (self: *Self) Size = null,
+childOffsetFn: ?*const fn (self: *Self, uid: Uid) Vector2Int = null,
 
-eventListeners: std.AutoHashMapUnmanaged(EventKind, Callback),
+eventListeners: std.AutoHashMapUnmanaged(EventKind, Callback) = std.AutoHashMapUnmanaged(EventKind, Callback).empty,
 
 pub fn cast(self: *Self, comptime T: type) *T {
     return @fieldParentPtr("component", self);
 }
 
-pub fn init(props: Props) Self {
+pub fn init() Self {
     return Self{
-        .alloc = props.alloc,
         .uid = Uid.init(),
-
         .rect = Rectangle.init(0, 0, 0, 0),
-        .children = std.ArrayList(*Self).empty,
-
-        .eventListeners = std.AutoHashMapUnmanaged(EventKind, Callback).empty,
         // .dispatchEventFn = props.dispatchEventFn,
     };
 }
 
 pub fn deinit(self: *Self, comptime T: type) void {
+    if (self.deinitFn) |deinit_fn| {
+        deinit_fn(self);
+    }
+
     const self_ptr = self.cast(T);
     self.alloc.destroy(self_ptr);
 }
@@ -162,18 +168,34 @@ pub fn defaultDraw(self: *Self) anyerror!void {
     const br: f32 = @floatFromInt(style.border_radius());
 
     rl.drawRectangleRounded(rect.intoRl(), br / rect.intoRl().height, 0, style.bg());
+    // rl.drawRectangleRoundedLinesEx(rect.intoRl(), br / rect.intoRl().height, 0, 1.0, rl.Color.black);
 
     for (self.children.items) |child| {
         try child.draw();
     }
 }
 
+pub fn getChild(self: *const Self, uid: Uid) ?*Self {
+    for (self.children.items) |child| {
+        if (child.uid.id == uid.id) {
+            return child;
+        }
+    }
+
+    return null;
+}
+
 fn childOffset(self: *Self, uid: Uid) Vector2Int {
+    if (self.childOffsetFn) |func| {
+        return func(self, uid);
+    }
+
     const styling = self.getStyling();
     const gap = styling.default.gap;
     const padding = styling.default.padding.value();
+    const rect = self.rectangle();
 
-    var offset = Vector2Int{ .x = self.rect.x + padding.left, .y = self.rect.y + padding.right };
+    var offset = Vector2Int{ .x = rect.x + padding.left, .y = rect.y + padding.right };
 
     for (self.children.items) |child| {
         if (child.uid.id == uid.id) {
@@ -195,55 +217,136 @@ fn childOffset(self: *Self, uid: Uid) Vector2Int {
     return offset;
 }
 
-pub fn size(self: *Self) struct { width: i32, height: i32 } {
+pub fn size(self: *Self) Size {
+    if (self.sizeFn) |sizeFn| {
+        return sizeFn(self);
+    }
+
+    return .{ .width = self.width(.{}), .height = self.height(.{}) };
+}
+
+pub fn fixedWidth(self: *Self) bool {
+    return self.getStyling().default.width != null;
+}
+
+pub fn fixedHeight(self: *Self) bool {
+    return self.getStyling().default.height != null;
+}
+
+const WidthOptions = struct { no_padding: bool = false };
+
+pub fn width(self: *Self, opts: WidthOptions) i32 {
+    if (self.sizeFn) |sizeFn| {
+        return sizeFn(self).width;
+    }
+
     const styling = self.getStyling();
     const padding = styling.default.padding.value();
 
-    var height: i32 = height: {
-        if (self.children.items.len == 0) {
-            break :height self.rect.height;
-        } else {
-            break :height padding.top + padding.bottom;
-        }
-    };
+    var w: i32 = 0;
 
-    var width: i32 = width: {
-        if (self.children.items.len == 0) {
-            break :width self.rect.width;
-        } else {
-            break :width padding.left + padding.right;
-        }
-    };
-
-    for (self.children.items) |child| {
-        const child_rect = child.rectangle();
-
-        const child_width: i32 = @intCast(child_rect.width);
-        const child_height: i32 = @intCast(child_rect.height);
-
-        switch (styling.default.direction) {
-            .Row => {
-                width += @intCast(styling.default.margin.value().left + styling.default.margin.value().right + child_width);
-
-                const new_height: i32 = @intCast(
-                    styling.default.margin.value().top + styling.default.margin.value().bottom + child_height,
-                );
-
-                height = @max(height, new_height);
+    if (styling.default.width) |w_| {
+        switch (w_) {
+            .Percent => |p| {
+                if (self.parent()) |parent_| {
+                    const parent_width: f32 = @floatFromInt(parent_.width(.{ .no_padding = true }));
+                    return @intFromFloat(parent_width * (p / 100.0));
+                } else {
+                    return self.rect.width;
+                }
             },
-            .Column => {
-                height += @intCast(styling.default.margin.value().top + styling.default.margin.value().bottom + child_height);
-
-                const new_width: i32 = @intCast(
-                    styling.default.margin.value().left + styling.default.margin.value().right + child_height,
-                );
-
-                width = @max(width, new_width);
+            .Pixels => |p| {
+                return p;
             },
         }
     }
 
-    return .{ .width = width, .height = height };
+    if (self.fixedWidth()) {
+        return w;
+    }
+
+    for (self.children.items) |child| {
+        if (child.fixedWidth()) {
+            continue;
+        }
+
+        switch (styling.default.direction) {
+            .Row => {
+                w += @intCast(child.width(.{}));
+            },
+            .Column => {
+                w = @max(w, child.width(.{}));
+            },
+        }
+    }
+
+    const len: i32 = @intCast(self.children.items.len);
+    if (styling.default.direction == .Row) {
+        w += @max(len - 1, 0) * styling.default.gap;
+    }
+
+    if (!opts.no_padding) {
+        w += padding.left + padding.right;
+    }
+
+    return w;
+}
+
+pub fn height(self: *Self, opts: WidthOptions) i32 {
+    if (self.sizeFn) |sizeFn| {
+        return sizeFn(self).height;
+    }
+
+    const styling = self.getStyling();
+    const padding = styling.default.padding.value();
+
+    var h: i32 = 0;
+
+    if (styling.default.height) |h_| {
+        switch (h_) {
+            .Percent => |p| {
+                if (self.parent()) |parent_| {
+                    const parent_height: f32 = @floatFromInt(parent_.height(.{ .no_padding = true }));
+                    return @intFromFloat(parent_height * (p / 100.0));
+                } else {
+                    return self.rect.height;
+                }
+            },
+            .Pixels => |p| {
+                return p;
+            },
+        }
+    }
+
+    if (self.fixedHeight()) {
+        return h;
+    }
+
+    for (self.children.items) |child| {
+        if (child.fixedHeight()) {
+            continue;
+        }
+
+        switch (styling.default.direction) {
+            .Row => {
+                h = @max(h, child.height(.{}));
+            },
+            .Column => {
+                h += @intCast(child.height(.{}));
+            },
+        }
+    }
+
+    const len: i32 = @intCast(self.children.items.len);
+    if (styling.default.direction == .Column) {
+        h += @max(len - 1, 0) * styling.default.gap;
+    }
+
+    if (!opts.no_padding) {
+        h += padding.top + padding.bottom;
+    }
+
+    return h;
 }
 
 pub fn rectangle(self: *Self) Rectangle {

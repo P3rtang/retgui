@@ -8,10 +8,10 @@ pub fn withState(comptime T: type, comptime State: type) type {
 
         state: State,
 
-        pub fn init(conf: T.Props) *Component {
-            const comp = T.init(conf);
+        pub fn init(props: anytype) *Component {
+            var comp = Component.t.createNode(T, props);
 
-            const self = conf.alloc.create(Self) catch unreachable;
+            const self = comp.alloc.create(Self) catch unreachable;
 
             self.* = Self{
                 .state = undefined,

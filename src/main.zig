@@ -3,8 +3,6 @@ const std = @import("std");
 const retgui = @import("retgui");
 const rl = @import("raylib");
 
-const ev = @import("events");
-
 const f = @import("components").font;
 const getFontSize = f.getFontSize;
 
@@ -14,11 +12,22 @@ const Component = components.Component;
 const ComponentTree = components.ComponentTree;
 const Rectangle = components.Rectangle;
 const withState = components.withState;
+const Grid = components.Grid;
+
+const ev = @import("events");
+const EventLoop = ev.EventLoop;
+const Effect = ev.Effect;
+const StateEffect = ev.StateEffect;
+const TaskEffect = ev.TaskEffect;
+const Task = ev.Task;
+const State = ev.State;
 
 const CONFIG_FLAGS = rl.ConfigFlags{
     .msaa_4x_hint = true,
     .window_resizable = false,
 };
+
+const STDIO = std.fs.File.stdout();
 
 pub fn main() !void {
     const alloc = std.heap.page_allocator;
@@ -28,13 +37,13 @@ pub fn main() !void {
     const window = Window.init(alloc);
     defer window.deinit(Window);
 
-    const body = Box.init(alloc);
-    defer body.deinit(Box);
+    const body = Component.t.createNode(Box, .{});
 
     body.styling = .{
         .default = .{
             .padding = .{ .All = 16 },
             .gap = 16,
+            .direction = .Column,
         },
     };
 
@@ -47,8 +56,9 @@ pub fn main() !void {
     try button.onEvent(.MouseLeftPress, .{
         .closure = button,
         .func = struct {
-            pub fn call(_: ev.Event, closure: *Component) anyerror!bool {
-                closure.getState(Button(u32), u32).?.* += 1;
+            pub fn call(_: ev.Event, closure: *anyopaque) anyerror!bool {
+                const comp: *Component = @ptrCast(@alignCast(closure));
+                comp.getState(Button(u32), u32).?.* += 1;
                 return true;
             }
         }.call,
@@ -58,35 +68,31 @@ pub fn main() !void {
         .default = .{
             .background = rl.Color.green,
             .border = .{
-                .width = 2,
-                .color = rl.Color.dark_green,
                 .radius = 12,
             },
-            .padding = .{ .Symmetric = .{ .vertical = 24, .horizontal = 32 } },
+            .padding = .{ .Symmetric = .{ .vertical = 24, .horizontal = 48 } },
         },
         .onHover = .{
             .background = rl.Color.red,
         },
     };
 
-    try body.addChild(button);
-
-    const button_text = Text.init(.{ .alloc = alloc, .content = "Click me!" });
+    const button_text = Component.t.createNode(Text, .{ .content = "Click me!" });
     defer button_text.deinit(Text);
-    try button.addChild(button_text);
 
-    const counter_box = Box.init(alloc);
-    defer counter_box.deinit(Box);
+    const counter_box = Component.t.createNode(Box, .{});
+
     try body.addChild(counter_box);
+    try body.addChild(button);
+    try button.addChild(button_text);
 
     counter_box.styling = .{
         .default = .{
             .background = rl.Color.alpha(rl.Color.light_gray, 0.5),
             .border = .{
-                .width = 2,
-                .color = rl.Color.gray,
-                .radius = 8,
+                .radius = 12,
             },
+            .width = .{ .Percent = 100 },
             .padding = .{ .Symmetric = .{ .vertical = 24, .horizontal = 32 } },
         },
     };
@@ -102,19 +108,18 @@ pub fn main() !void {
     try counter_text.onEvent(.Draw, .{
         .closure = counter_text,
         .func = struct {
-            pub fn call(_: ev.Event, closure: *Component) anyerror!bool {
-                const count = closure.getState(CounterText, *Component).?.*.getState(Button(u32), u32).?.*;
+            pub fn call(_: ev.Event, closure: *anyopaque) anyerror!bool {
+                const comp: *Component = @ptrCast(@alignCast(closure));
+                const count = comp.getState(CounterText, *Component).?.*.getState(Button(u32), u32).?.*;
 
-                closure.setText(std.fmt.allocPrint(closure.alloc, "{d}", .{count}) catch "Error");
+                comp.setText(std.fmt.allocPrint(comp.alloc, "{d}", .{count}) catch "Error");
 
                 return true;
             }
         }.call,
     });
 
-    var timer_text_box = Box.init(alloc);
-    defer timer_text_box.deinit(Box);
-    try body.addChild(timer_text_box);
+    var timer_text_box = Component.t.createNode(Box, .{});
 
     // TODO: add alignment property to styling and align to top-right
     timer_text_box.styling = .{ .default = .{
@@ -136,19 +141,33 @@ pub fn main() !void {
         },
     };
 
-    try timer_text_box.addChild(timer_text);
-
     try timer_text.onEvent(.Draw, .{
         .closure = timer_text,
         .func = struct {
-            pub fn call(_: ev.Event, closure: *Component) anyerror!bool {
-                var timer = closure.getState(TimerText, std.time.Timer).?;
-                closure.setText(std.fmt.allocPrint(closure.alloc, "{d}ms", .{timer.*.read() / 1_000_000}) catch "Error");
+            pub fn call(_: ev.Event, closure: *anyopaque) anyerror!bool {
+                const comp: *Component = @ptrCast(@alignCast(closure));
+                var timer = comp.getState(TimerText, std.time.Timer).?;
+                comp.setText(std.fmt.allocPrint(comp.alloc, "{d}ms", .{timer.*.read() / 1_000_000}) catch "Error");
                 timer.reset();
                 return true;
             }
         }.call,
     });
+
+    const request = try ev.Fetch.init(alloc, "https://www.google.com");
+    var chain = request.task.then(void, struct {
+        pub fn call(result: []const u8, _: anytype) Task(void, anyerror) {
+            std.debug.print("Fetched {} bytes from Google", .{result.len});
+
+            return .{ .alloc = undefined };
+        }
+    }.call, .{});
+
+    TaskEffect(void, anyerror).init(&chain.task);
+
+    try initGrid(window);
+    try window.addChild(timer_text_box);
+    try timer_text_box.addChild(timer_text);
 
     try window.draw();
 }
@@ -158,16 +177,16 @@ const Box = struct {
 
     component: Component,
 
-    pub fn init(alloc: std.mem.Allocator) *Component {
-        const comp = Component.init(.{ .alloc = alloc });
+    pub fn init(_: anytype) Box {
+        const component = Component.init();
+        return Box{ .component = component };
+    }
 
-        const self = alloc.create(Self) catch unreachable;
+    pub fn addChild(comp: *Component, comptime Child: type, props: anytype) !*Component {
+        const child = Component.t.createNode(Child, props);
+        try comp.addChild(child);
 
-        self.* = Self{
-            .component = comp,
-        };
-
-        return &self.component;
+        return child;
     }
 };
 
@@ -186,7 +205,7 @@ pub fn Button(comptime T: type) type {
         props: Props,
 
         pub fn init(props: Props) *Component {
-            const comp = Component.init(.{ .alloc = props.alloc });
+            const comp = Component.init();
 
             const self = props.alloc.create(Self) catch unreachable;
 
@@ -208,9 +227,10 @@ const Window = struct {
     var isInitalized: bool = false;
 
     component: Component,
+    event_loop: *EventLoop,
 
     pub fn init(alloc: std.mem.Allocator) *Component {
-        var comp = Component.init(.{ .alloc = alloc });
+        var comp = Component.init();
         comp.drawFn = &Self.draw;
         comp.setRectangle(Rectangle.init(0, 0, 800, 600));
 
@@ -218,6 +238,7 @@ const Window = struct {
 
         self.* = Self{
             .component = comp,
+            .event_loop = EventLoop.init(),
         };
 
         Component.t.componentTree = ComponentTree.init(alloc, &self.component) catch @panic("Window already initialized.");
@@ -226,6 +247,8 @@ const Window = struct {
     }
 
     pub fn draw(this: *Component) !void {
+        const self = this.cast(Self);
+
         // raylib does not care about the first end if there was no begin
         rl.endDrawing();
 
@@ -263,7 +286,17 @@ const Window = struct {
         rl.beginDrawing();
         rl.clearBackground(rl.Color.ray_white);
 
+        self.event_loop.eval();
+
         // Any call to the component draw function will redraw all children as well
         try this.draw();
     }
 };
+
+fn initGrid(window: *Component) !void {
+    const grid = Component.t.createNode(Grid, .{ .cols = 1, .rows = 1 });
+
+    try window.addChild(grid);
+    const box = try Grid.addChild(grid, Box, .{}, 0, 0);
+    _ = try Box.addChild(box, Text, .{ .content = "col = 0, row = 0" });
+}

@@ -94,6 +94,18 @@ pub fn init(alloc: std.mem.Allocator, root: *Component) !Self {
     };
 }
 
+pub fn createNode(comptime T: type, props: anytype) *Component {
+    const component = T.init(props);
+    var component_ptr = componentTree.?.alloc.create(T) catch @panic("Out of memory");
+    component_ptr.* = component;
+
+    switch (@typeInfo(@TypeOf(component_ptr.component))) {
+        .pointer => return component_ptr.component,
+        .@"struct" => return &component_ptr.component,
+        else => @compileError("Only a pointer or a struct can be a component"),
+    }
+}
+
 pub fn getRoot(self: *Self) *ComponentNode {
     return self.nodes.getPtr(self.root).?;
 }

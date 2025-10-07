@@ -92,14 +92,19 @@ pub const Styling = struct {
     }
 };
 
+pub const DynamicSize = union(enum) {
+    Pixels: i32,
+    Percent: f32,
+};
+
 pub const WithoutSelector = struct {
     background: rl.Color = transparent,
     color: rl.Color = rl.Color.black,
 
     x: ?i32 = null,
     y: ?i32 = null,
-    height: ?i32 = null,
-    width: ?i32 = null,
+    height: ?DynamicSize = null,
+    width: ?DynamicSize = null,
 
     padding: SideValue = .{ .All = 0 },
     margin: SideValue = .{ .All = 0 },
@@ -172,8 +177,8 @@ pub const OptionalStyling = struct {
 
     x: ?i32 = null,
     y: ?i32 = null,
-    height: ?i32 = null,
-    width: ?i32 = null,
+    height: ?DynamicSize = null,
+    width: ?DynamicSize = null,
 
     padding: ?SideValue = null,
     margin: ?SideValue = null,

@@ -47,15 +47,13 @@ pub const Event = union(EventKind) {
     }
 };
 
-pub fn Callback(comptime T: type) type {
-    return struct {
-        const Self = @This();
+pub const Callback = struct {
+    const Self = @This();
 
-        closure: *T,
-        func: *const fn (event: Event, component: *T) anyerror!bool,
+    closure: *anyopaque,
+    func: *const fn (event: Event, component: *anyopaque) anyerror!bool,
 
-        pub fn call(self: *Self, event: Event) anyerror!bool {
-            return self.func(event, self.closure);
-        }
-    };
-}
+    pub fn call(self: *Self, event: Event) anyerror!bool {
+        return self.func(event, self.closure);
+    }
+};
