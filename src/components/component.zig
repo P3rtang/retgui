@@ -15,6 +15,7 @@ const Self = @This();
 
 const EventKind = ev.EventKind;
 const Callback = ev.Callback;
+const OnEvent = ev.OnEvent;
 
 const Styling = stl.Styling;
 const Selector = stl.Selector;
@@ -390,8 +391,17 @@ pub fn addChild(self: *Self, child: *Self) !void {
     try self.children.append(self.alloc, child);
 }
 
-pub fn onEvent(self: *Self, kind: EventKind, handler: Callback) !void {
-    try self.eventListeners.put(self.alloc, kind, handler);
+pub fn addGenericChild(self: *Self, comptime T: type, props: anytype) !*Self {
+    const child = t.createNode(T, props);
+    child.super = self;
+    try self.addChild(child);
+
+    return child;
+}
+
+pub fn onEvent(self: *Self, kind: EventKind, comptime Closure: type, callback: *const fn (closure: *Closure) anyerror!bool, closure: Closure) !void {
+    const event = ev.OnEvent(Closure).init(self.alloc, callback, closure);
+    try self.eventListeners.put(self.alloc, kind, event);
 }
 
 pub fn dispatchEvent(self: *Self, event: ev.Event) anyerror!bool {
@@ -436,7 +446,7 @@ pub fn getState(self: *Self, comptime C: type, comptime T: type) ?*T {
     return null;
 }
 
-pub fn setState(self: *Self, comptime C: type, comptime T: type, state: T) void {
+pub fn setState(self: *Self, comptime C: type, state: anytype) void {
     if (self.super) |sup| {
         const c: *C = @ptrCast(@alignCast(sup));
         c.state = state;

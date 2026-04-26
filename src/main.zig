@@ -1,19 +1,13 @@
 const std = @import("std");
 
-const retgui = @import("retgui");
-const rl = @import("raylib");
-
-const f = @import("components").font;
-const getFontSize = f.getFontSize;
-
 const components = @import("components");
 const Text = components.Text;
+const ButtonC = components.Button;
 const Component = components.Component;
 const ComponentTree = components.ComponentTree;
 const Rectangle = components.Rectangle;
 const withState = components.withState;
 const Grid = components.Grid;
-
 const ev = @import("events");
 const EventLoop = ev.EventLoop;
 const Effect = ev.Effect;
@@ -21,6 +15,11 @@ const StateEffect = ev.StateEffect;
 const TaskEffect = ev.TaskEffect;
 const Task = ev.Task;
 const State = ev.State;
+const Chain = ev.Chain;
+const f = @import("components").font;
+const getFontSize = f.getFontSize;
+const retgui = @import("retgui");
+const rl = @import("raylib");
 
 const CONFIG_FLAGS = rl.ConfigFlags{
     .msaa_4x_hint = true,
@@ -51,18 +50,14 @@ pub fn main() !void {
 
     var button = Button(u32).init(.{ .alloc = alloc });
     defer button.deinit(Button(u32));
-    button.setState(Button(u32), u32, 0);
+    button.setState(Button(u32), 0);
 
-    try button.onEvent(.MouseLeftPress, .{
-        .closure = button,
-        .func = struct {
-            pub fn call(_: ev.Event, closure: *anyopaque) anyerror!bool {
-                const comp: *Component = @ptrCast(@alignCast(closure));
-                comp.getState(Button(u32), u32).?.* += 1;
-                return true;
-            }
-        }.call,
-    });
+    try button.onEvent(.MouseLeftPress, *Component, struct {
+        pub fn call(closure: **Component) anyerror!bool {
+            closure.*.getState(Button(u32), u32).?.* += 1;
+            return true;
+        }
+    }.call, button);
 
     button.styling = .{
         .default = .{
@@ -103,21 +98,17 @@ pub fn main() !void {
     defer counter_text.deinit(Text);
 
     try counter_box.addChild(counter_text);
-    counter_text.setState(CounterText, *Component, button);
+    counter_text.setState(CounterText, button);
 
-    try counter_text.onEvent(.Draw, .{
-        .closure = counter_text,
-        .func = struct {
-            pub fn call(_: ev.Event, closure: *anyopaque) anyerror!bool {
-                const comp: *Component = @ptrCast(@alignCast(closure));
-                const count = comp.getState(CounterText, *Component).?.*.getState(Button(u32), u32).?.*;
+    try counter_text.onEvent(.Draw, *Component, struct {
+        pub fn call(closure: **Component) anyerror!bool {
+            const count = closure.*.getState(CounterText, *Component).?.*.getState(Button(u32), u32).?.*;
 
-                comp.setText(std.fmt.allocPrint(comp.alloc, "{d}", .{count}) catch "Error");
+            closure.*.setText(std.fmt.allocPrint(closure.*.alloc, "{d}", .{count}) catch "Error");
 
-                return true;
-            }
-        }.call,
-    });
+            return true;
+        }
+    }.call, counter_text);
 
     var timer_text_box = Component.t.createNode(Box, .{});
 
@@ -133,7 +124,7 @@ pub fn main() !void {
 
     var timer_text = TimerText.init(.{ .alloc = alloc, .content = "0ms" });
     defer timer_text.deinit(Text);
-    timer_text.setState(TimerText, std.time.Timer, refresh_timer);
+    timer_text.setState(TimerText, refresh_timer);
 
     timer_text.styling = .{
         .default = .{
@@ -141,31 +132,18 @@ pub fn main() !void {
         },
     };
 
-    try timer_text.onEvent(.Draw, .{
-        .closure = timer_text,
-        .func = struct {
-            pub fn call(_: ev.Event, closure: *anyopaque) anyerror!bool {
-                const comp: *Component = @ptrCast(@alignCast(closure));
-                var timer = comp.getState(TimerText, std.time.Timer).?;
-                comp.setText(std.fmt.allocPrint(comp.alloc, "{d}ms", .{timer.*.read() / 1_000_000}) catch "Error");
-                timer.reset();
-                return true;
-            }
-        }.call,
-    });
-
-    const request = try ev.Fetch.init(alloc, "https://www.google.com");
-    var chain = request.task.then(void, struct {
-        pub fn call(result: []const u8, _: anytype) Task(void, anyerror) {
-            std.debug.print("Fetched {} bytes from Google", .{result.len});
-
-            return .{ .alloc = undefined };
+    try timer_text.onEvent(.Draw, *Component, struct {
+        pub fn call(comp: **Component) anyerror!bool {
+            var timer = comp.*.getState(TimerText, std.time.Timer).?;
+            comp.*.setText(std.fmt.allocPrint(comp.*.alloc, "{d}ms", .{timer.*.read() / 1_000_000}) catch "Error");
+            timer.reset();
+            return true;
         }
-    }.call, .{});
-
-    TaskEffect(void, anyerror).init(&chain.task);
+    }.call, timer_text);
 
     try initGrid(window);
+    try fetchButton(window);
+
     try window.addChild(timer_text_box);
     try timer_text_box.addChild(timer_text);
 
@@ -252,8 +230,12 @@ const Window = struct {
         // raylib does not care about the first end if there was no begin
         rl.endDrawing();
 
-        // Pause to avoid busy looping
-        rl.pollInputEvents();
+        if (!self.event_loop.eval()) {
+            // move this to be an effect as well
+            rl.pollInputEvents();
+        }
+
+        std.Thread.sleep(10_000_000);
 
         // Initialize event waiting only once and after the first poll
         // This avoids pausing on startup
@@ -286,17 +268,60 @@ const Window = struct {
         rl.beginDrawing();
         rl.clearBackground(rl.Color.ray_white);
 
-        self.event_loop.eval();
-
         // Any call to the component draw function will redraw all children as well
+        // TODO: test if this is actual tail recursive
+        // We might be blowing up the stack
         try this.draw();
     }
 };
 
 fn initGrid(window: *Component) !void {
-    const grid = Component.t.createNode(Grid, .{ .cols = 1, .rows = 1 });
+    const grid = Component.t.createNode(Grid, .{ .cols = 2, .rows = 2 });
+
+    grid.styling = .{ .default = .{ .gap = 16, .padding = .{ .All = 8 } } };
 
     try window.addChild(grid);
     const box = try Grid.addChild(grid, Box, .{}, 0, 0);
     _ = try Box.addChild(box, Text, .{ .content = "col = 0, row = 0" });
+
+    const box2 = try Grid.addChild(grid, Box, .{}, 1, 1);
+    _ = try Box.addChild(box2, Text, .{ .content = "box2" });
+}
+
+fn fetchButton(window: *Component) !void {
+    const button = Component.t.createNode(components.Button, .{});
+    const alloc = button.alloc;
+    button.styling = .{ .default = .{ .padding = .{ .All = 32 } } };
+
+    try window.addChild(button);
+
+    const request = try ev.Fetch.init(alloc, "https://jsonplaceholder.typicode.com/posts/1");
+
+    const text = try button.addGenericChild(Text, .{ .content = "Load" });
+    std.log.debug("text_ uid: {d}", .{text.uid.id});
+
+    const chain = request.task.then(*Component, void, struct {
+        pub fn call(result: []const u8, t: *Component) Task(void, anyerror) {
+            var text_ = t.cast(Text);
+            text_.state = result;
+
+            std.log.debug("text_ uid: {d}, content: {s}", .{ t.uid.id, text_.state });
+
+            return .{ .state = .Resolved };
+        }
+    }.call, text);
+
+    const closure = .{ .task = chain, .text = text };
+
+    try button.onEvent(.MouseLeftDown, @TypeOf(closure), struct {
+        pub fn call(c: *@TypeOf(closure)) anyerror!bool {
+            const t = c.text.cast(Text);
+            t.state = "Loading";
+
+            TaskEffect(void, anyerror).init(@constCast(&c.task.task));
+
+            return false;
+        }
+        // TODO: allow non ptr in here
+    }.call, closure);
 }

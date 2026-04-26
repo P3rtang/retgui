@@ -90,6 +90,10 @@ pub const Styling = struct {
     pub fn font_size(self: Styling) i32 {
         return self.default.font_size;
     }
+
+    pub fn gap(self: Styling) i32 {
+        return self.default.gap;
+    }
 };
 
 pub const DynamicSize = union(enum) {

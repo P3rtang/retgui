@@ -1,4 +1,5 @@
 const std = @import("std");
+const rl = @import("raylib");
 
 const Effect = @import("effect.zig").Effect;
 
@@ -27,12 +28,17 @@ pub const EventLoop = struct {
         self.effects.deinit();
     }
 
-    pub fn eval(self: *EventLoop) void {
+    pub fn eval(self: *EventLoop) bool {
+        var isDirty = false;
+
         for (self.effects.items) |effect| {
             if (effect.dirty) {
                 effect.callback(effect);
+                isDirty = true;
             }
         }
+
+        return isDirty;
     }
 
     pub fn addEffect(self: *EventLoop, effect: *Effect) void {

@@ -1,3 +1,5 @@
+const std = @import("std");
+
 pub const EventKind = enum {
     Draw,
     MouseMove,
@@ -50,10 +52,51 @@ pub const Event = union(EventKind) {
 pub const Callback = struct {
     const Self = @This();
 
-    closure: *anyopaque,
-    func: *const fn (event: Event, component: *anyopaque) anyerror!bool,
+    closureFn: *const fn (*Callback) *anyopaque,
+    func: *const fn (*Callback, Event, *anyopaque) anyerror!bool,
+    super: *anyopaque,
 
     pub fn call(self: *Self, event: Event) anyerror!bool {
-        return self.func(event, self.closure);
+        const closure = self.closureFn(self);
+
+        return self.func(self, event, closure);
+    }
+
+    pub fn cast(c: *Callback, comptime T: type) *T {
+        return @ptrCast(@alignCast(c.super));
     }
 };
+
+pub fn OnEvent(comptime Closure: type) type {
+    return struct {
+        const Self = @This();
+
+        alloc: std.mem.Allocator,
+        closure: *Closure,
+        func: *const fn (*Closure) anyerror!bool,
+
+        pub fn init(alloc: std.mem.Allocator, func: *const fn (*Closure) anyerror!bool, closure: Closure) Callback {
+            const closure_ptr = alloc.create(Closure) catch @panic("Out of memory");
+            closure_ptr.* = closure;
+
+            const onEvent = alloc.create(Self) catch @panic("Out of memory");
+            onEvent.* = .{ .alloc = alloc, .closure = closure_ptr, .func = func };
+
+            return Callback{
+                .closureFn = closureFn,
+                .func = callbackFn,
+                .super = onEvent,
+            };
+        }
+
+        fn callbackFn(c: *Callback, _: Event, closure: *anyopaque) anyerror!bool {
+            const self = c.cast(Self);
+            return self.func(@ptrCast(@alignCast(closure)));
+        }
+
+        fn closureFn(c: *Callback) *anyopaque {
+            const self = c.cast(Self);
+            return @ptrCast(@alignCast(self.closure));
+        }
+    };
+}

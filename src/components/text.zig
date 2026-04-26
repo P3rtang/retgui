@@ -8,8 +8,7 @@ const getFontSize = @import("font.zig").getFontSize;
 const Self = @This();
 
 component: Component,
-content: *State,
-super: *anyopaque = undefined,
+state: []const u8,
 
 pub fn init(props: anytype) Self {
     var component = Component.init();
@@ -20,14 +19,11 @@ pub fn init(props: anytype) Self {
 
     return Self{
         .component = component,
-        .content = State.init(component.alloc, @field(props, "content")),
+        .state = @field(props, "content"),
     };
 }
 
-pub fn deinit(comp: *Component) void {
-    const self = comp.cast(Self);
-    comp.alloc.destroy(self.content);
-}
+pub fn deinit(_: *Component) void {}
 
 pub fn draw(this: *Component) !void {
     const self = this.cast(Self);
@@ -36,7 +32,7 @@ pub fn draw(this: *Component) !void {
     const font_size = styling.font_size();
     const font = getFontSize(this.alloc, font_size);
 
-    const content = State.get(&self.content.state);
+    const content = self.state;
     var null_terminated: [:0]u8 = this.alloc.allocSentinel(u8, content.len, 0) catch unreachable;
     std.mem.copyForwards(u8, null_terminated[0..content.len], content);
 
@@ -59,20 +55,18 @@ pub fn draw(this: *Component) !void {
 
 pub fn setText(this: *Component, text: []const u8) void {
     const self = this.cast(Self);
-    State.set(&self.content.state, text);
+    self.state = text;
 }
 
 fn size(comp: *Component) Component.Size {
     const self = comp.cast(Self);
 
-    const content = State.get(&self.content.state);
-
     const styling = comp.styling.withSelector(comp.selectors);
     const font_size = styling.font_size();
     const font = getFontSize(comp.alloc, font_size);
 
-    var null_terminated: [:0]u8 = comp.alloc.allocSentinel(u8, content.len, 0) catch unreachable;
-    std.mem.copyForwards(u8, null_terminated[0..content.len], content);
+    var null_terminated: [:0]u8 = comp.alloc.allocSentinel(u8, self.state.len, 0) catch unreachable;
+    std.mem.copyForwards(u8, null_terminated[0..self.state.len], self.state);
 
     const s = rl.measureTextEx(font, null_terminated, @floatFromInt(font_size), 2);
 

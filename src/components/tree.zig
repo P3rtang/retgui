@@ -99,11 +99,7 @@ pub fn createNode(comptime T: type, props: anytype) *Component {
     var component_ptr = componentTree.?.alloc.create(T) catch @panic("Out of memory");
     component_ptr.* = component;
 
-    switch (@typeInfo(@TypeOf(component_ptr.component))) {
-        .pointer => return component_ptr.component,
-        .@"struct" => return &component_ptr.component,
-        else => @compileError("Only a pointer or a struct can be a component"),
-    }
+    return &component_ptr.component;
 }
 
 pub fn getRoot(self: *Self) *ComponentNode {

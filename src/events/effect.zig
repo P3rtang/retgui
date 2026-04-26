@@ -89,7 +89,7 @@ pub fn Task(comptime T: type, comptime Err: type) type {
             Failed: Err,
         };
 
-        alloc: std.mem.Allocator,
+        alloc: std.mem.Allocator = undefined,
         state: Result = .Pending,
 
         pollFn: ?*const fn (self: *Self) Result = null,
@@ -97,6 +97,7 @@ pub fn Task(comptime T: type, comptime Err: type) type {
         pub fn init(alloc: std.mem.Allocator) Self {
             return Self{
                 .alloc = alloc,
+                .state = .Pending,
             };
         }
 
@@ -131,43 +132,43 @@ pub fn Task(comptime T: type, comptime Err: type) type {
 
         pub fn then(
             self: *Self,
+            comptime Closure: type,
             comptime U: type,
-            comptime func: fn (T, anytype) Task(U, anyerror),
-            closure: anytype,
-        ) Chain(T, Err, U, func) {
-            return Chain(T, Err, U, func).init(self, closure);
+            comptime func: fn (T, Closure) Task(U, anyerror),
+            closure: Closure,
+        ) Chain(T, Closure, Err, U, func) {
+            return Chain(T, Closure, Err, U, func).init(self, closure);
         }
     };
 }
 
-pub fn Chain(comptime T: type, comptime Err: type, comptime U: type, comptime func: fn (T, anytype) Task(U, anyerror)) type {
+pub fn Chain(comptime T: type, comptime Closure: type, comptime Err: type, comptime U: type, comptime func: fn (T, Closure) Task(U, anyerror)) type {
     return struct {
         const Self = @This();
         const PrevTask = Task(T, Err);
         const NextTask = Task(U, anyerror);
 
-        comptime func: fn (T, anytype) NextTask = func,
+        comptime func: fn (T, Closure) NextTask = func,
 
         prev: *PrevTask,
         task: NextTask,
 
         prev_resolved: bool = false,
-        closure: *anyopaque,
+        closure: Closure,
 
-        pub fn init(prev: *PrevTask, closure: anytype) Self {
+        pub fn init(prev: *PrevTask, closure: Closure) Self {
             var next_task = NextTask.init(prev.alloc);
             next_task.pollFn = &Self.poll;
 
             return Self{
                 .prev = prev,
                 .task = next_task,
-                .closure = @ptrCast(@constCast(&closure)),
+                .closure = closure,
             };
         }
 
         pub fn poll(task: *NextTask) NextTask.Result {
             const self = task.super(Self);
-            std.debug.print("Polling chain task...\n", .{});
 
             if (self.prev_resolved) {
                 return self.task.poll();
@@ -250,6 +251,7 @@ pub const Fetch = struct {
         const self = task.super(Self);
 
         if (!self.is_running) {
+            self.is_running = true;
             _ = std.Thread.spawn(.{}, Self.wait, .{self}) catch |err| {
                 return .{ .Failed = err };
             };
