@@ -298,30 +298,26 @@ fn fetchButton(window: *Component) !void {
     const request = try ev.Fetch.init(alloc, "https://jsonplaceholder.typicode.com/posts/1");
 
     const text = try button.addGenericChild(Text, .{ .content = "Load" });
-    std.log.debug("text_ uid: {d}", .{text.uid.id});
 
     const chain = request.task.then(*Component, void, struct {
         pub fn call(result: []const u8, t: *Component) Task(void, anyerror) {
             var text_ = t.cast(Text);
-            text_.state = result;
-
-            std.log.debug("text_ uid: {d}, content: {s}", .{ t.uid.id, text_.state });
+            text_.content = result;
 
             return .{ .state = .Resolved };
         }
     }.call, text);
 
-    const closure = .{ .task = chain, .text = text };
+    const Closure = struct { task: @TypeOf(chain), text: *Component };
+    const closure: Closure = .{ .task = chain, .text = text };
 
-    try button.onEvent(.MouseLeftDown, @TypeOf(closure), struct {
-        pub fn call(c: *@TypeOf(closure)) anyerror!bool {
-            const t = c.text.cast(Text);
-            t.state = "Loading";
+    try button.onEvent(.MouseLeftDown, Closure, struct {
+        pub fn call(c: *Closure) anyerror!bool {
+            c.text.setProp(Text, .Content, "Loading");
 
             TaskEffect(void, anyerror).init(@constCast(&c.task.task));
 
             return false;
         }
-        // TODO: allow non ptr in here
     }.call, closure);
 }

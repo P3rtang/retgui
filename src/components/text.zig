@@ -8,18 +8,34 @@ const getFontSize = @import("font.zig").getFontSize;
 const Self = @This();
 
 component: Component,
-state: []const u8,
+content: []const u8,
+
+pub const Field = enum {
+    Content,
+
+    pub inline fn Type(field: Field) type {
+        switch (field) {
+            .Content => return []const u8,
+        }
+    }
+
+    pub inline fn String(field: Field) []const u8 {
+        switch (field) {
+            .Content => return "content",
+        }
+    }
+};
 
 pub fn init(props: anytype) Self {
     var component = Component.init();
     component.deinitFn = &Self.deinit;
     component.drawFn = &Self.draw;
-    component.setTextFn = &Self.setText;
     component.sizeFn = &Self.size;
+    component.setTextFn = &Self.setText;
 
     return Self{
         .component = component,
-        .state = @field(props, "content"),
+        .content = @field(props, "content"),
     };
 }
 
@@ -32,7 +48,7 @@ pub fn draw(this: *Component) !void {
     const font_size = styling.font_size();
     const font = getFontSize(this.alloc, font_size);
 
-    const content = self.state;
+    const content = self.content;
     var null_terminated: [:0]u8 = this.alloc.allocSentinel(u8, content.len, 0) catch unreachable;
     std.mem.copyForwards(u8, null_terminated[0..content.len], content);
 
@@ -53,11 +69,6 @@ pub fn draw(this: *Component) !void {
     rl.drawTextEx(font, null_terminated, pos, @floatFromInt(font_size), 2, rl.Color.black);
 }
 
-pub fn setText(this: *Component, text: []const u8) void {
-    const self = this.cast(Self);
-    self.state = text;
-}
-
 fn size(comp: *Component) Component.Size {
     const self = comp.cast(Self);
 
@@ -65,10 +76,15 @@ fn size(comp: *Component) Component.Size {
     const font_size = styling.font_size();
     const font = getFontSize(comp.alloc, font_size);
 
-    var null_terminated: [:0]u8 = comp.alloc.allocSentinel(u8, self.state.len, 0) catch unreachable;
-    std.mem.copyForwards(u8, null_terminated[0..self.state.len], self.state);
+    var null_terminated: [:0]u8 = comp.alloc.allocSentinel(u8, self.content.len, 0) catch unreachable;
+    std.mem.copyForwards(u8, null_terminated[0..self.content.len], self.content);
 
     const s = rl.measureTextEx(font, null_terminated, @floatFromInt(font_size), 2);
 
     return .{ .height = @intFromFloat(s.y), .width = @intFromFloat(s.x) };
+}
+
+pub fn setText(this: *Component, text: []const u8) void {
+    const self = this.cast(Self);
+    self.content = text;
 }

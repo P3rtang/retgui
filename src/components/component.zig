@@ -453,6 +453,11 @@ pub fn setState(self: *Self, comptime C: type, state: anytype) void {
     }
 }
 
+pub fn setProp(self: *Self, comptime C: type, field: C.Field, value: field.Type()) void {
+    var c: *C = @ptrCast(@alignCast(self));
+    @field(c, field.String()) = value;
+}
+
 pub fn parent(self: *Self) ?*Self {
     if (t.componentTree == null) {
         return null;
